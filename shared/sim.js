@@ -4,7 +4,10 @@
 import { WORLD, floorHeight, forwardVec, clampToWorld, randomPointInZone, zoneForDepth } from './world.js';
 import { SPECIES, SPECIES_INDEX, EVOLVE_LEVELS, MAX_LEVEL, xpNeeded, stats, xpValue, BOT_TABLE } from './species.js';
 
-const FOOD_TARGET = { shallow: 260, mid: 170, deep: 90 };
+const FOOD_TARGET = { shallow: 480, mid: 190, deep: 90 };
+const FOOD_REFILL = { shallow: 8, mid: 3, deep: 2 };
+const CELL = 12;
+const cellKey = (cx, cz) => (cx + 1000) * 4096 + (cz + 1000);
 const FOOD_XP = { shallow: 1, mid: 2, deep: 3 };
 const MEAT_LIFETIME = 45;
 
@@ -34,6 +37,10 @@ export class Sim {
     this.entities = new Map();   // id -> entity (players + bots)
     this.players = new Map();    // clientId -> { id, clientId, name, send, entity, ... }
     this.food = new Map();       // id -> food
+    this.grid = new Map();       // cell -> Set(food), for fast proximity lookups
+    this.plankton = { shallow: 0, mid: 0, deep: 0 };
+    this.meat = new Set();
+    this.upkeepTimer = 0;
     this.foodAdded = [];
     this.foodRemoved = [];
     this.clouds = [];            // ink clouds
@@ -88,21 +95,51 @@ export class Sim {
   spawnPlankton(zone) {
     const p = randomPointInZone(zone);
     const f = { id: this.nextId++, type: 0, pos: p, xp: FOOD_XP[zone], zone, born: this.time };
-    this.food.set(f.id, f);
-    this.foodAdded.push(f);
+    this.addFood(f);
+    this.plankton[zone]++;
   }
 
   spawnMeat(pos, xp) {
     const p = [pos[0] + (Math.random() - 0.5) * 2, pos[1] + (Math.random() - 0.5) * 2, pos[2] + (Math.random() - 0.5) * 2];
     clampToWorld(p, 0.3);
     const f = { id: this.nextId++, type: 1, pos: p, xp, born: this.time };
+    this.addFood(f);
+    this.meat.add(f);
+  }
+
+  addFood(f) {
     this.food.set(f.id, f);
     this.foodAdded.push(f);
+    f.cell = cellKey(Math.floor(f.pos[0] / CELL), Math.floor(f.pos[2] / CELL));
+    let set = this.grid.get(f.cell);
+    if (!set) { set = new Set(); this.grid.set(f.cell, set); }
+    set.add(f);
   }
 
   removeFood(f) {
-    this.food.delete(f.id);
+    if (!this.food.delete(f.id)) return;
     this.foodRemoved.push(f.id);
+    const set = this.grid.get(f.cell);
+    if (set) set.delete(f);
+    if (f.type === 0) this.plankton[f.zone]--;
+    else this.meat.delete(f);
+  }
+
+  // calls fn(food, distSquared) for food within r of pos; stops early if fn returns true
+  foodNear(pos, r, fn) {
+    const r2 = r * r;
+    const x0 = Math.floor((pos[0] - r) / CELL), x1 = Math.floor((pos[0] + r) / CELL);
+    const z0 = Math.floor((pos[2] - r) / CELL), z1 = Math.floor((pos[2] + r) / CELL);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cz = z0; cz <= z1; cz++) {
+        const set = this.grid.get(cellKey(cx, cz));
+        if (!set) continue;
+        for (const f of set) {
+          const d = dist2(f.pos, pos);
+          if (d < r2 && fn(f, d)) return;
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- players
@@ -462,12 +499,9 @@ export class Sim {
     b.hunger = Math.min(1, b.hunger + 0.05);
     if (prey && b.hunger > 0.45) { b.mode = 'chase'; b.target = prey.id; b.chaseTime = 0; return; }
     // look for food nearby
-    let food = null, foodD = (8 + e.st.size * 4) ** 2;
-    if (e.st.size < 3) {
-      for (const f of this.food.values()) {
-        const d = dist2(f.pos, e.pos);
-        if (d < foodD) { food = f; foodD = d; }
-      }
+    let food = null, foodD = Infinity;
+    if (e.st.size < 4) {
+      this.foodNear(e.pos, 8 + e.st.size * 4, (f, d) => { if (d < foodD) { food = f; foodD = d; } });
     }
     if (food) { b.mode = 'food'; b.target = food.id; return; }
     b.mode = 'wander'; b.target = null;
@@ -535,8 +569,9 @@ export class Sim {
   }
 
   // ---------------------------------------------------------------- tick
-  tick(dt) {
+  tick(dt, send = true) {
     this.time += dt;
+    this.lbTimer -= dt;
     const now = this.time;
 
     for (const e of this.entities.values()) {
@@ -578,25 +613,27 @@ export class Sim {
       const mouth = e.st.size * 0.5 + 0.7;
       const fwd = forwardVec(e.yaw, e.pitch);
       const mp = [e.pos[0] + fwd[0] * e.st.size * 0.4, e.pos[1] + fwd[1] * e.st.size * 0.4, e.pos[2] + fwd[2] * e.st.size * 0.4];
-      for (const f of this.food.values()) {
-        if (dist2(f.pos, mp) < mouth * mouth) {
-          this.removeFood(f);
-          this.giveXp(e, f.xp);
-          if (e.isPlayer) e.player.send({ t: 'ate', type: f.type, xp: f.xp });
-          if (!e.alive) break;
-        }
+      const eaten = [];
+      this.foodNear(mp, mouth, (f) => { eaten.push(f); });
+      for (const f of eaten) {
+        this.removeFood(f);
+        this.giveXp(e, f.xp);
+        if (e.isPlayer) e.player.send({ t: 'ate', type: f.type, xp: f.xp });
+        if (!e.alive) break;
       }
     }
 
     // world upkeep
     this.clouds = this.clouds.filter(c => c.until > now);
-    for (const f of this.food.values()) if (f.type === 1 && now - f.born > MEAT_LIFETIME) this.removeFood(f);
-    const counts = { shallow: 0, mid: 0, deep: 0 };
-    for (const f of this.food.values()) if (f.type === 0) counts[f.zone]++;
-    for (const z of Object.keys(counts)) {
-      let missing = FOOD_TARGET[z] - counts[z];
+    this.upkeepTimer -= dt;
+    if (this.upkeepTimer <= 0) {
+      this.upkeepTimer = 1;
+      for (const f of [...this.meat]) if (now - f.born > MEAT_LIFETIME) this.removeFood(f);
+    }
+    for (const z of Object.keys(this.plankton)) {
+      const missing = FOOD_TARGET[z] - this.plankton[z];
       // trickle back in
-      for (let i = 0; i < Math.min(missing, 3); i++) this.spawnPlankton(z);
+      for (let i = 0; i < Math.min(missing, FOOD_REFILL[z]); i++) this.spawnPlankton(z);
     }
     this.botRespawns = this.botRespawns.filter(r => {
       if (r.at > now) return true;
@@ -604,14 +641,13 @@ export class Sim {
       return false;
     });
 
-    this.broadcast(dt);
+    if (send) this.broadcast();
   }
 
-  broadcast(dt) {
+  broadcast() {
     const now = this.time;
     const fa = this.foodAdded.map(foodTuple);
     const fr = this.foodRemoved;
-    this.lbTimer -= dt;
     let lb = null;
     if (this.lbTimer <= 0) {
       this.lbTimer = 1;

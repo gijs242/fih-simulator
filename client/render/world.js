@@ -304,11 +304,11 @@ export class OceanWorld {
       const glow = new THREE.Mesh(new THREE.SphereGeometry(1.4, 10, 8), glowMat);
       glow.position.set(x, top, z);
       this.scene.add(glow);
-      const light = new THREE.PointLight('#ff6a20', 30, 45, 1.6);
-      light.position.set(x, top + 2, z);
-      this.scene.add(light);
-      this.vents.push({ x, y: top, z, light });
+      this.vents.push({ x, y: top, z });
     }
+    // a single light that sits on whichever vent is nearest the camera
+    this.ventLight = new THREE.PointLight('#ff6a20', 0, 50, 1.6);
+    this.scene.add(this.ventLight);
     const N = 700;
     const pos = new Float32Array(N * 3);
     this.ventParts = [];
@@ -351,7 +351,12 @@ export class OceanWorld {
       vp.setXYZ(i, v.x + p.dx * (1 + p.t * 1.5), v.y + p.t * 4, v.z + p.dz * (1 + p.t * 1.5));
     }
     vp.needsUpdate = true;
-    for (const v of this.vents) v.light.intensity = 26 + Math.sin(this.time.value * 3 + v.x) * 6;
+    let best = null, bd = Infinity;
+    for (const v of this.vents) { const d = (v.x - camPos.x) ** 2 + (v.z - camPos.z) ** 2; if (d < bd) { bd = d; best = v; } }
+    if (best && bd < 90 * 90) {
+      this.ventLight.position.set(best.x, best.y + 2, best.z);
+      this.ventLight.intensity = 26 + Math.sin(this.time.value * 3 + best.x) * 6;
+    } else this.ventLight.intensity = 0;
   }
 
   wrapPoints(points, c, w, h, dy) {

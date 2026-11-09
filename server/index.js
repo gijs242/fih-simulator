@@ -98,7 +98,10 @@ setInterval(() => {
   const now = performance.now();
   acc += Math.min(0.25, (now - last) / 1000);
   last = now;
-  while (acc >= DT) { sim.tick(DT); acc -= DT; }
+  // if the server fell behind, simulate the missed ticks but only send one update
+  let n = 0;
+  while (acc >= DT) { acc -= DT; n++; sim.tick(DT, acc < DT); }
+  if (n > 4) acc = 0;
 }, 1000 / WORLD.tickRate / 2);
 
 server.listen(PORT, () => console.log(`Fih Simulator running on http://localhost:${PORT}`));

@@ -60,7 +60,7 @@ export class LocalConnection {
       const now = performance.now();
       acc += Math.min(0.25, (now - last) / 1000);
       last = now;
-      while (acc >= DT) { this.sim.tick(DT); acc -= DT; }
+      while (acc >= DT) { acc -= DT; this.sim.tick(DT, acc < DT); }
     }, 25);
   }
   onMessage(fn) { this.handlers.push(fn); }

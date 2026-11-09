@@ -15,7 +15,7 @@ const params = new URLSearchParams(location.search);
 // ------------------------------------------------------------------ renderer
 const canvas = $('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
@@ -195,7 +195,16 @@ function game() {
     e.c.dispose();
   }
 
+  // server clock tracking for buffered interpolation of other creatures
+  const net = { offset: null, delay: 0.12 };
   function onSnap(m) {
+    const recv = performance.now() / 1000;
+    const off = recv - m.time;
+    if (net.offset === null || off < net.offset) net.offset = off;
+    else net.offset += (off - net.offset) * 0.002; // follow slow clock drift
+    // how late this packet arrived compared to the best case: grow the buffer fast, shrink it slowly
+    const late = off - net.offset;
+    net.delay = Math.min(0.6, Math.max(0.1, late + 0.06 > net.delay ? late + 0.06 : net.delay * 0.995));
     if (m.fa) for (const f of m.fa) food.add(f);
     if (m.fr) for (const id of m.fr) food.remove(id);
     if (m.lb) hud.live(m.lb, myId);
@@ -217,15 +226,16 @@ function game() {
       let e = ents.get(id);
       if (e && e.sp !== sp) { removeEnt(e); ents.delete(id); e = null; }
       if (!e) {
-        e = { id, sp, c: new Creature(sp), pos: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), yaw, pitch, tyaw: yaw, tpitch: pitch, lastHit: -99, speed: 0 };
+        e = { id, sp, c: new Creature(sp), pos: new THREE.Vector3(x, y, z), buf: [], yaw, pitch, lastHit: -99, speed: 0 };
         e.c.root.position.copy(e.pos);
         scene.add(e.c.root);
         ents.set(id, e);
+        e.st = stats(sp, lvl); e.size = e.st.size;
       }
-      e.target.set(x, y, z);
-      e.tyaw = yaw; e.tpitch = pitch;
+      e.buf.push({ t: m.time, x, y, z, yaw, pitch });
+      if (e.buf.length > 30) e.buf.shift();
+      if (e.level !== lvl) { e.st = stats(sp, lvl); e.size = e.st.size; }
       e.level = lvl; e.hp = hp; e.flags = flags; e.name = name || null;
-      e.size = stats(sp, lvl).size;
     }
     for (const [id, e] of ents) if (!seen.has(id)) { removeEnt(e); ents.delete(id); }
     if (m.ev) for (const ev of m.ev) onEvent(ev);
@@ -371,22 +381,38 @@ function game() {
 
   // ---------------------------------------------------------------- remote entities
   const tmp = new THREE.Vector3();
+  function sampleBuf(e, rt) {
+    const b = e.buf;
+    if (!b.length) return null;
+    // drop samples we no longer need
+    while (b.length > 2 && b[1].t <= rt) b.shift();
+    const a = b[0];
+    if (b.length === 1 || rt <= a.t) return { x: a.x, y: a.y, z: a.z, yaw: a.yaw, pitch: a.pitch };
+    const c = b[1];
+    const span = c.t - a.t || 0.05;
+    let k = (rt - a.t) / span;
+    k = Math.min(k, 1.5); // brief extrapolation if the next update is late
+    return { x: a.x + (c.x - a.x) * k, y: a.y + (c.y - a.y) * k, z: a.z + (c.z - a.z) * k, yaw: a.yaw + angleDiff(c.yaw, a.yaw) * Math.min(k, 1), pitch: a.pitch + (c.pitch - a.pitch) * Math.min(k, 1) };
+  }
   function updateEnts(dt) {
-    const k = 1 - Math.exp(-dt * 10);
+    const rt = net.offset === null ? 0 : performance.now() / 1000 - net.offset - net.delay;
+    const k = 1 - Math.exp(-dt * 25);
     for (const e of ents.values()) {
+      const smp = sampleBuf(e, rt);
+      if (!smp) continue;
       tmp.copy(e.pos);
-      e.pos.lerp(e.target, k);
-      const moved = tmp.distanceTo(e.pos) / Math.max(dt, 1e-3);
-      e.speed += (moved - e.speed) * Math.min(1, dt * 5);
-      const turn = angleDiff(e.tyaw, e.yaw);
+      e.pos.lerp(tmp.set(smp.x, smp.y, smp.z), k);
+      const moved = Math.hypot(smp.x - (e.px ?? smp.x), smp.y - (e.py ?? smp.y), smp.z - (e.pz ?? smp.z)) / Math.max(dt, 1e-3);
+      e.px = smp.x; e.py = smp.y; e.pz = smp.z;
+      e.speed += (moved - e.speed) * Math.min(1, dt * 4);
+      const turn = angleDiff(smp.yaw, e.yaw);
       e.yaw += turn * k;
-      e.pitch += (e.tpitch - e.pitch) * k;
-      e.roll = (e.roll || 0) + (Math.max(-0.5, Math.min(0.5, -turn * 3)) - (e.roll || 0)) * k;
+      e.pitch += (smp.pitch - e.pitch) * k;
+      e.roll = (e.roll || 0) + (Math.max(-0.5, Math.min(0.5, -turn / Math.max(dt, 1e-3) * 0.15)) - (e.roll || 0)) * Math.min(1, dt * 4);
       e.c.root.position.copy(e.pos);
       e.c.root.rotation.set(-e.pitch, e.yaw, e.roll);
       e.c.root.scale.setScalar(e.size);
-      const st = stats(e.sp, e.level);
-      e.c.update(dt, Math.min(1.5, e.speed / st.speed), e.flags);
+      e.c.update(dt, Math.min(1.5, e.speed / e.st.speed), e.flags);
       e.c.setOpacity((e.flags & 4) ? 0.08 : 1);
     }
   }

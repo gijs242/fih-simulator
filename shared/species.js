@@ -187,11 +187,14 @@ export function xpNeeded(level) {
   return Math.round(6 * Math.pow(1.25, level - 1));
 }
 
+// Every creature is drawn and collides at this multiple of its listed size.
+export const SIZE_SCALE = 1.3;
+
 export function stats(spIndex, level) {
   const s = SPECIES[spIndex];
   const over = Math.max(0, level - s.minLevel);
   return {
-    size: s.size * (1 + 0.045 * over),
+    size: s.size * SIZE_SCALE * (1 + 0.045 * over),
     maxHp: Math.round(s.hp * (1 + 0.08 * over)),
     speed: s.speed * (1 + 0.012 * over),
     bite: s.bite * (1 + 0.08 * over),
@@ -202,7 +205,8 @@ export function stats(spIndex, level) {
 
 // XP a creature is worth when killed
 export function xpValue(size) {
-  return Math.round(2 + 5 * size * size);
+  const base = size / SIZE_SCALE;
+  return Math.round(2 + 5 * base * base);
 }
 
 // Bot population per zone: [speciesId, count, minLevel, maxLevel]
