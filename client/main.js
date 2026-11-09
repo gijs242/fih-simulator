@@ -45,9 +45,10 @@ function game() {
   let me = null;               // latest server state about me
   let mine = null;             // my creature model
   const ents = new Map();      // id -> remote entity
-  const local = { pos: new THREE.Vector3(0, -10, -250), vel: new THREE.Vector3(), stunUntil: 0, dashT: 0, boostT: 0, bodyYaw: 0, bodyPitch: 0, faceT: 0, faceYaw: 0, facePitch: 0 };
+  const local = { pos: new THREE.Vector3(0, -10, -250), vel: new THREE.Vector3(), stunUntil: 0, dashT: 0, boostT: 0, predEat: -9, bodyYaw: 0, bodyPitch: 0, faceT: 0, faceYaw: 0, facePitch: 0 };
   const cds = { bite: 0, a2: 0, dash: 0, dashMax: 2.5 };
   let sendTimer = 0;
+  let pingTimer = 0;
   let clock = 0;
   let alive = false;
   let lastAlltime = [];
@@ -206,9 +207,15 @@ function game() {
         if (m.stun) local.stunUntil = clock + m.stun;
         break;
       case 'ate':
-        audio.eat(m.type === 1);
-        if (mine) fx.bubbles(local.pos.toArray(), 2, 0.3);
+        // already played when we predicted the bite locally
+        if (clock - local.predEat > 0.8) { audio.eat(m.type === 1); if (mine) fx.bubbles(local.pos.toArray(), 2, 0.3); }
         break;
+      case 'pong': {
+        const rtt = performance.now() / 1000 - m.c;
+        net.rtt = net.rtt ? net.rtt * 0.7 + rtt * 0.3 : rtt;
+        $('ping').textContent = `Ping ${Math.round(net.rtt * 1000)} ms`;
+        break;
+      }
       case 'feed': hud.feed(m.msg); break;
       case 'dead': onDead(m); break;
       case 's': onSnap(m); break;
@@ -236,7 +243,7 @@ function game() {
   }
 
   // server clock tracking for buffered interpolation of other creatures
-  const net = { offset: null, delay: 0.12 };
+  const net = { offset: null, delay: 0.1, rtt: 0 };
   function onSnap(m) {
     const recv = performance.now() / 1000;
     const off = recv - m.time;
@@ -244,7 +251,7 @@ function game() {
     else net.offset += (off - net.offset) * 0.002; // follow slow clock drift
     // how late this packet arrived compared to the best case: grow the buffer fast, shrink it slowly
     const late = off - net.offset;
-    net.delay = Math.min(0.6, Math.max(0.1, late + 0.06 > net.delay ? late + 0.06 : net.delay * 0.995));
+    net.delay = Math.min(0.35, Math.max(0.08, late + 0.05 > net.delay ? late + 0.05 : net.delay * 0.99));
     if (m.fa) for (const f of m.fa) food.add(f);
     if (m.fr) for (const id of m.fr) food.remove(id);
     if (m.lb) hud.live(m.lb, myId);
@@ -306,11 +313,13 @@ function game() {
       }
       case 'hit': {
         const c = creatureOf(ev.id);
-        if (c) c.hit();
         const e = ents.get(ev.id); if (e) e.lastHit = clock;
-        fx.blood(ev.pos, ev.s, Math.min(2, ev.d / 30 + 0.4));
+        // my own bite was already shown the instant I clicked
+        const predicted = ev.by === myId && e && clock - (e.predHit ?? -9) < 0.7;
+        if (c && !predicted) c.hit();
+        if (!predicted) fx.blood(ev.pos, ev.s, Math.min(2, ev.d / 30 + 0.4));
         if (ev.id === myId) { hud.hurt(); audio.hurt(); }
-        else audio.hit(volAt(ev.pos), ev.s);
+        else if (!predicted) audio.hit(volAt(ev.pos), ev.s);
         if (ev.by === myId) { const e2 = ents.get(ev.id); if (e2) e2.lastHit = clock; }
         break;
       }
@@ -357,6 +366,42 @@ function game() {
   // ---------------------------------------------------------------- local control
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), desired = new THREE.Vector3();
 
+  // attacks carry how far in the past we see other creatures, so the server can judge hits fairly
+  function sendAttack(n, yaw, pitch) {
+    conn.send({ t: 'a', n, yaw, pitch, rw: r3(Math.min(0.5, net.delay + net.rtt)) });
+  }
+
+  // nearest creature a bite would hit right now (same rule as the server)
+  function targetInReach() {
+    const f = forwardVec(input.yaw, input.pitch);
+    let best = null, bd = Infinity;
+    for (const e of ents.values()) {
+      const reach = me.size * 0.7 + e.size * 0.5 + 1.2;
+      const dx = e.pos.x - local.pos.x, dy = e.pos.y - local.pos.y, dz = e.pos.z - local.pos.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d > reach || d > bd) continue;
+      const c = d < 0.01 ? 1 : (dx * f[0] + dy * f[1] + dz * f[2]) / d;
+      if (c > 0.34 || d < e.size * 0.5 + me.size * 0.3) { best = e; bd = d; }
+    }
+    return best;
+  }
+
+  // eat food the moment the mouth touches it; the server confirms the XP
+  function predictEating() {
+    const bf = forwardVec(local.bodyYaw, local.bodyPitch);
+    const mx = local.pos.x + bf[0] * me.size * 0.4, my = local.pos.y + bf[1] * me.size * 0.4, mz = local.pos.z + bf[2] * me.size * 0.4;
+    const r = me.size * 0.5 + 0.7;
+    for (const it of food.items.values()) {
+      if (it.hiddenAt !== undefined && food.t - it.hiddenAt < 1.2) continue;
+      if ((it.x - mx) ** 2 + (it.y - my) ** 2 + (it.z - mz) ** 2 < r * r) {
+        it.hiddenAt = food.t;
+        local.predEat = clock;
+        audio.eat(it.type === 1);
+        fx.bubbles([mx, my, mz], 2, 0.3);
+      }
+    }
+  }
+
   function faceAim(t) { local.faceYaw = input.yaw; local.facePitch = input.pitch; local.faceT = t; }
 
   function controlMe(dt) {
@@ -394,7 +439,14 @@ function game() {
         mine.attack('bite');
         fx.chomp(mine.root, me.size);
         audio.bite(1, me.size);
-        conn.send({ t: 'a', n: 1, yaw: input.yaw, pitch: input.pitch });
+        sendAttack(1, input.yaw, input.pitch);
+        // show the hit right away if something is in reach; the server confirms the damage
+        const tgt = targetInReach();
+        if (tgt) {
+          tgt.c.hit(); tgt.predHit = clock; tgt.lastHit = clock;
+          fx.blood(tgt.pos.toArray(), tgt.size, 0.8);
+          audio.hit(1, tgt.size);
+        }
       }
       if (press.a2 && cds.a2 <= 0) {
         const type = sp.a2.type;
@@ -405,10 +457,10 @@ function game() {
           const bf = forwardVec(local.bodyYaw, local.bodyPitch);
           local.vel.set(-bf[0], -bf[1], -bf[2]).multiplyScalar(me.speed * 3.2);
           local.faceYaw = local.bodyYaw; local.facePitch = local.bodyPitch; local.faceT = 0.6;
-          conn.send({ t: 'a', n: 2, yaw: local.bodyYaw, pitch: local.bodyPitch });
+          sendAttack(2, local.bodyYaw, local.bodyPitch);
         } else {
           faceAim(0.5);
-          conn.send({ t: 'a', n: 2, yaw: input.yaw, pitch: input.pitch });
+          sendAttack(2, input.yaw, input.pitch);
           switch (type) {
             case 'lunge': local.vel.copy(fwd).multiplyScalar(me.speed * 2.6); break;
             case 'ram': local.vel.copy(fwd).multiplyScalar(me.speed * 2.4); break;
@@ -433,6 +485,7 @@ function game() {
     const turn = angleDiff(ty, local.bodyYaw) * tk;
     local.bodyYaw += turn;
     local.bodyPitch += (tp - local.bodyPitch) * tk;
+    predictEating();
     mine.root.position.copy(local.pos);
     mine.root.rotation.y = local.bodyYaw;
     mine.root.rotation.x = -local.bodyPitch;
@@ -444,6 +497,8 @@ function game() {
     mine.update(dt, Math.min(1.5, local.vel.length() / me.speed), mine.flags || 0);
     mine.setOpacity((mine.flags & 4) ? 0.35 : 1);
     // send
+    pingTimer -= dt;
+    if (pingTimer <= 0) { pingTimer = 2; conn.send({ t: 'ping', c: performance.now() / 1000 }); }
     sendTimer -= dt;
     if (sendTimer <= 0) {
       sendTimer = 0.05;
@@ -520,6 +575,7 @@ function game() {
     const maxD = 25 + me.size * 4 + local.pos.distanceTo(camera.position);
     let best = null, bestScore = 0;
     for (const it of food.items.values()) {
+      if (it.hiddenAt !== undefined && food.t - it.hiddenAt < 1.2) continue;
       toV.set(it.x - camera.position.x, it.y - camera.position.y, it.z - camera.position.z);
       const d = toV.length();
       if (d > maxD || d < 0.5) continue;

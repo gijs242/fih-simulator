@@ -110,3 +110,5 @@ button.pick:hover { border-color: var(--accent); background: rgba(40,70,50,0.5);
 button.pick.current { border-color: var(--accent); background: rgba(63,107,76,0.55); }
 button.pick b { display: block; font-size: 14px; }
 button.pick small { color: var(--muted); font-size: 11px; }
+#ping { position: absolute; right: 16px; bottom: 18px; font-size: 11px; color: var(--muted); }
+#feed { bottom: 36px; }

@@ -207,6 +207,7 @@ export class Sim {
         if (p.joined && (!p.entity || !p.entity.alive)) this.spawnPlayer(p);
         break;
       case 'in': this.handleInput(p, msg); break;
+      case 'ping': if (Number.isFinite(msg.c)) p.send({ t: 'pong', c: msg.c }); break;
       case 'a': this.handleAttack(p, msg); break;
       case 'evo': this.handleEvolve(p, msg); break;
       case 'pick': this.handlePick(p, msg); break;
@@ -242,6 +243,8 @@ export class Sim {
     if (!e || !e.alive) return;
     if (Number.isFinite(msg.yaw)) e.yaw = msg.yaw;
     if (Number.isFinite(msg.pitch)) e.pitch = Math.max(-1.5, Math.min(1.5, msg.pitch));
+    // lag compensation: judge this attack against where targets were on the attacker's screen
+    e.rewind = Number.isFinite(msg.rw) ? Math.max(0, Math.min(0.5, msg.rw)) : 0;
     if (msg.n === 1) this.bite(e);
     else if (msg.n === 2) this.ability(e);
   }
@@ -329,14 +332,32 @@ export class Sim {
   // ---------------------------------------------------------------- combat
   stunned(e) { return e.fx.stun && e.fx.stun > this.time; }
 
+  // where an entity was `ago` seconds in the past (from its recent position history)
+  posAt(o, ago) {
+    const h = o.hist;
+    if (!ago || !h || !h.length) return o.pos;
+    const t = this.time - ago;
+    for (let i = h.length - 1; i > 0; i--) {
+      const b = h[i], a = h[i - 1];
+      if (a.t <= t) {
+        const k = b.t > a.t ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 1;
+        return [a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k];
+      }
+    }
+    const f = h[0];
+    return [f.x, f.y, f.z];
+  }
+
   findTargets(e, reachMul, coneDeg, multi) {
     const fwd = forwardVec(e.yaw, e.pitch);
+    const rw = e.isPlayer ? e.rewind || 0 : 0;
     const cosLim = Math.cos(coneDeg * Math.PI / 180);
     const hits = [];
     for (const o of this.entities.values()) {
       if (o === e || !o.alive) continue;
       const reach = (e.st.size * 0.7 + o.st.size * 0.5 + 1.2) * reachMul;
-      const dx = o.pos[0] - e.pos[0], dy = o.pos[1] - e.pos[1], dz = o.pos[2] - e.pos[2];
+      const op = rw ? this.posAt(o, rw) : o.pos;
+      const dx = op[0] - e.pos[0], dy = op[1] - e.pos[1], dz = op[2] - e.pos[2];
       const d = Math.hypot(dx, dy, dz);
       if (d > reach) continue;
       const c = d < 0.01 ? 1 : (dx * fwd[0] + dy * fwd[1] + dz * fwd[2]) / d;
@@ -660,6 +681,10 @@ export class Sim {
     for (const e of this.entities.values()) {
       if (!e.alive) continue;
       if (e.bot) this.updateBot(e, dt);
+      // ~1s of position history for lag-compensated hits
+      if (!e.hist) e.hist = [];
+      e.hist.push({ t: now, x: e.pos[0], y: e.pos[1], z: e.pos[2] });
+      if (e.hist.length > 22) e.hist.shift();
       // lunge / ram contact
       if (e.fx.lunge > now && !e.fx.lungeHit) {
         if (this.bite(e, e.fx.lungeMul, 1.15, { free: true, knock: e.fx.lungeKnock, stun: e.fx.lungeKnock ? 1.0 : 0 })) {

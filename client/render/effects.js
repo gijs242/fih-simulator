@@ -187,6 +187,7 @@ export class FoodRenderer {
     let np = 0, nm = 0;
     const R2 = 140 * 140;
     for (const it of this.items.values()) {
+      if (it.hiddenAt !== undefined && this.t - it.hiddenAt < 1.2) continue; // eaten locally, awaiting server
       const dx = it.x - cam.x, dz = it.z - cam.z;
       if (dx * dx + dz * dz > R2) continue;
       const bob = Math.sin(this.t * 1.5 + it.ph) * 0.3;
