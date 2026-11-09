@@ -326,7 +326,7 @@ export class OceanWorld {
     const k1 = Math.min(1, depth / 60), k2 = Math.max(0, Math.min(1, (depth - 60) / 110));
     this.fog.color.copy(FOG_SHALLOW).lerp(FOG_MID, k1).lerp(FOG_DEEP, k2);
     const viewDist = focus ? camPos.distanceTo(focus) : 4;
-    const vis = Math.min(1, Math.max(0.33, 8 / (viewDist + 4)));
+    const vis = Math.min(1, Math.max(0.12, 8 / (viewDist + 4)));
     this.fog.density = (0.016 + k1 * 0.006 + k2 * 0.008) * vis + extraDark * 0.25;
     this.hemi.intensity = 1.5 * (1 - k1 * 0.6) * (1 - k2 * 0.8) + 0.25;
     this.sun.intensity = 1.8 * (1 - k1 * 0.75) * (1 - k2);

@@ -6,7 +6,7 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Hud } from './hud.js';
 import { OnlineConnection, LocalConnection } from './net.js';
-import { SPECIES, stats } from '/shared/species.js';
+import { SPECIES, stats, TIER_NAMES } from '/shared/species.js';
 import { forwardVec, clampToWorld, floorHeight, WORLD } from '/shared/world.js';
 
 const $ = (id) => document.getElementById(id);
@@ -135,12 +135,51 @@ function game() {
 
   input.onKey = (code) => {
     if (code === 'KeyM') $('mute').textContent = audio.toggleMute() ? 'M: sound off' : 'M: sound on';
+    if (code === 'Tab' && alive) togglePicker();
     if (me && me.choices && /^Digit[1-4]$/.test(code)) {
       const i = Number(code.slice(5)) - 1;
       if (me.choices[i]) choose(me.choices[i]);
     }
   };
   hud.onChoose = (id) => choose(id);
+
+  // ---------------------------------------------------------------- side menu: pick any fish
+  function buildPicker() {
+    const list = $('picklist');
+    list.innerHTML = '';
+    for (let tier = 0; tier < TIER_NAMES.length; tier++) {
+      const h = document.createElement('h4');
+      h.textContent = TIER_NAMES[tier];
+      list.appendChild(h);
+      for (const s of SPECIES) {
+        if (s.tier !== tier || s.ambient) continue;
+        const b = document.createElement('button');
+        b.className = 'pick';
+        b.dataset.sp = s.id;
+        b.innerHTML = `<b></b><small></small>`;
+        b.firstChild.textContent = s.name;
+        b.lastChild.textContent = `${s.role} · ${s.era}`;
+        b.addEventListener('click', () => {
+          if (!conn || !alive) return;
+          conn.send({ t: 'pick', sp: s.id });
+          togglePicker(false);
+          input.lock();
+        });
+        list.appendChild(b);
+      }
+    }
+  }
+  buildPicker();
+  function togglePicker(force) {
+    const el = $('picker');
+    const open = force ?? el.classList.contains('hidden');
+    el.classList.toggle('hidden', !open);
+    if (open) {
+      input.unlock();
+      for (const b of el.querySelectorAll('.pick')) b.classList.toggle('current', !!me && SPECIES[me.sp].id === b.dataset.sp);
+    }
+  }
+  $('pickbtn').addEventListener('click', () => togglePicker());
   function choose(id) { if (conn) conn.send({ t: 'evo', sp: id }); }
 
   // ---------------------------------------------------------------- messages
@@ -422,9 +461,9 @@ function game() {
   function updateCamera(dt) {
     const size = me ? me.size : 1;
     const f = forwardVec(input.yaw, input.pitch * 0.85);
-    const dist = 2.2 + size * 2.3;
+    const dist = 2.2 + size * 1.25;
     const center = alive ? local.pos : camPos;
-    camTarget.set(center.x - f[0] * dist, center.y - f[1] * dist + size * 0.85 + 0.4, center.z - f[2] * dist);
+    camTarget.set(center.x - f[0] * dist, center.y - f[1] * dist + size * 0.5 + 0.5, center.z - f[2] * dist);
     const fl = floorHeight(camTarget.x, camTarget.z) + 0.8;
     if (camTarget.y < fl) camTarget.y = fl;
     if (camTarget.y > -0.4) camTarget.y = -0.4;
@@ -434,8 +473,42 @@ function game() {
     lookAt.set(center.x + f[0] * size * 1.5, center.y + f[1] * size * 1.5 + size * 0.2, center.z + f[2] * size * 1.5);
     if (alive) camera.lookAt(lookAt);
     else camera.lookAt(camPos.x + 10, camPos.y - 2, camPos.z + 30);
-    camera.far = 260 + (me ? Math.max(0, -local.pos.y) : 0);
+    camera.far = 300 + size * 4 + (me ? Math.max(0, -local.pos.y) : 0);
     camera.updateProjectionMatrix();
+  }
+
+  // ---------------------------------------------------------------- aiming: highlight food you look at, red crosshair when a bite would land
+  const aimDir = new THREE.Vector3(), toV = new THREE.Vector3();
+  function aimAssist() {
+    if (!alive || !me) { food.highlight(null); $('crosshair').classList.remove('target'); return; }
+    camera.getWorldDirection(aimDir);
+    // food: smallest angle from the view direction, within swimming range
+    const maxD = 25 + me.size * 4 + local.pos.distanceTo(camera.position);
+    let best = null, bestScore = 0;
+    for (const it of food.items.values()) {
+      toV.set(it.x - camera.position.x, it.y - camera.position.y, it.z - camera.position.z);
+      const d = toV.length();
+      if (d > maxD || d < 0.5) continue;
+      const ang = Math.acos(Math.min(1, toV.dot(aimDir) / d));
+      // how far off the crosshair still counts: wider for close food, a few degrees for far food
+      const tol = Math.min(0.25, Math.max(0.05, (1.5 + me.size * 0.15) / d));
+      if (ang > tol) continue;
+      const score = 1 - ang / tol;
+      if (score > bestScore) { bestScore = score; best = it; }
+    }
+    food.highlight(best);
+    // creatures in bite range (same rule as the server)
+    const f = forwardVec(input.yaw, input.pitch);
+    let inRange = false;
+    for (const e of ents.values()) {
+      const reach = me.size * 0.7 + e.size * 0.5 + 1.2;
+      toV.set(e.pos.x - local.pos.x, e.pos.y - local.pos.y, e.pos.z - local.pos.z);
+      const d = toV.length();
+      if (d > reach) continue;
+      const c = d < 0.01 ? 1 : (toV.x * f[0] + toV.y * f[1] + toV.z * f[2]) / d;
+      if (c > 0.34 || d < e.size * 0.5 + me.size * 0.3) { inRange = true; break; }
+    }
+    $('crosshair').classList.toggle('target', inRange);
   }
 
   // ---------------------------------------------------------------- labels
@@ -476,6 +549,7 @@ function game() {
     hud.ink(inInk && alive);
     fx.update(dt);
     food.update(dt, camera.position);
+    aimAssist();
     if (alive && me) {
       hud.update(me, -local.pos.y, cds);
       audio.setDepth(-local.pos.y);
@@ -489,7 +563,7 @@ function game() {
   $('play').disabled = true;
   connectOnline();
   // test hook
-  window.__fih = { get me() { return me; }, get alive() { return alive; }, get ents() { return ents.size; }, get players() { return [...ents.values()].filter((e) => e.name).map((e) => e.name); }, local, input, get conn() { return conn; }, get myId() { return myId; } };
+  window.__fih = { get me() { return me; }, get alive() { return alive; }, get ents() { return ents.size; }, get players() { return [...ents.values()].filter((e) => e.name).map((e) => e.name); }, local, input, get conn() { return conn; }, get myId() { return myId; }, get hl() { return food.glow.visible ? food.hl : null; }, food };
 }
 
 function angleDiff(a, b) {

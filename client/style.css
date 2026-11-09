@@ -97,3 +97,16 @@ table.keys td:first-child { color: var(--accent); padding-right: 10px; white-spa
   #board { width: 160px; font-size: 11px; }
   #status { width: 200px; }
 }
+
+#crosshair.target { width: 12px; height: 12px; margin: -6px; background: rgba(230, 70, 50, 0.9); box-shadow: 0 0 8px rgba(230, 70, 50, 0.8); }
+#pickbtn { position: absolute; left: 18px; top: 228px; width: auto; margin: 0; padding: 6px 12px; font-size: 12px; font-weight: normal; letter-spacing: 0.04em; pointer-events: auto; background: rgba(0,0,0,0.55); border: 1px solid var(--line); color: var(--ink); }
+#pickbtn:hover { border-color: var(--accent); background: rgba(0,0,0,0.7); }
+#picker { position: absolute; left: 0; top: 0; bottom: 0; width: 290px; max-width: 85vw; overflow-y: auto; pointer-events: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px; z-index: 5; }
+#picker h3 { margin: 0; color: var(--accent); letter-spacing: 0.08em; }
+#picker p { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+#picker h4 { margin: 14px 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.14em; }
+button.pick { display: block; width: 100%; margin: 4px 0 0; padding: 7px 10px; text-align: left; font-size: 14px; font-weight: normal; letter-spacing: 0; background: rgba(0,0,0,0.35); border: 1px solid var(--line); color: var(--ink); }
+button.pick:hover { border-color: var(--accent); background: rgba(40,70,50,0.5); }
+button.pick.current { border-color: var(--accent); background: rgba(63,107,76,0.55); }
+button.pick b { display: block; font-size: 14px; }
+button.pick small { color: var(--muted); font-size: 11px; }

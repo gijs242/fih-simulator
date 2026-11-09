@@ -115,6 +115,18 @@ export class FoodRenderer {
     for (let i = 0; i < p.count; i++) p.setXYZ(i, p.getX(i) * (0.8 + Math.random() * 0.4), p.getY(i) * 0.7, p.getZ(i) * (0.8 + Math.random() * 0.4));
     mg.computeVertexNormals();
     this.meat = new THREE.InstancedMesh(mg, new THREE.MeshStandardMaterial({ color: '#7a2a20', emissive: '#2a0806', roughness: 0.6, flatShading: true }), 600);
+    // glow marker for the food you're looking at
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,220,1)'); g.addColorStop(0.35, 'rgba(255,240,140,0.6)'); g.addColorStop(1, 'rgba(255,220,100,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = 'rgba(255,245,180,0.9)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(32, 32, 26, 0, Math.PI * 2); ctx.stroke();
+    this.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, fog: false }));
+    this.glow.visible = false;
+    this.glow.renderOrder = 10;
+    scene.add(this.glow);
     this.plankton.frustumCulled = false;
     this.meat.frustumCulled = false;
     scene.add(this.plankton, this.meat);
@@ -126,7 +138,8 @@ export class FoodRenderer {
     this.t = 0;
   }
   set(list) { this.items.clear(); for (const f of list) this.add(f); }
-  add(f) { this.items.set(f[0], { type: f[1], x: f[2], y: f[3], z: f[4], ph: Math.random() * 6 }); }
+  highlight(it) { this.hl = it; }
+  add(f) { this.items.set(f[0], { id: f[0], type: f[1], x: f[2], y: f[3], z: f[4], ph: Math.random() * 6 }); }
   remove(id) { this.items.delete(id); }
   update(dt, cam) {
     this.t += dt;
@@ -153,6 +166,14 @@ export class FoodRenderer {
       }
     }
     this.plankton.count = np; this.meat.count = nm;
+    const h = this.hl && this.items.get(this.hl.id) === this.hl ? this.hl : null;
+    if (h) {
+      const bob = Math.sin(this.t * 1.5 + h.ph) * (h.type === 0 ? 0.3 : 0.09);
+      this.glow.position.set(h.x, h.y + bob, h.z);
+      const d = this.glow.position.distanceTo(cam);
+      this.glow.scale.setScalar(Math.max(1.2, d * 0.045) * (1 + Math.sin(this.t * 6) * 0.12));
+      this.glow.visible = true;
+    } else this.glow.visible = false;
     this.plankton.instanceMatrix.needsUpdate = true;
     this.meat.instanceMatrix.needsUpdate = true;
   }

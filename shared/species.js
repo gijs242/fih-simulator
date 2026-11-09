@@ -178,6 +178,23 @@ export const SPECIES = [
     desc: 'A raptorial sperm whale with foot-long teeth.',
     model: { kind: 'whale', c1: '#3e3c3a', c2: '#1a1918', belly: '#7d7a74' },
   },
+  // ---- harmless ambient prey (not playable through evolution; schools of these swim around every player)
+  {
+    id: 'krill', name: 'Antarctic Krill', tier: 0, role: 'Prey', era: 'Modern', ambient: true,
+    size: 0.25, hp: 6, speed: 6, bite: 1, biteCd: 1, armor: 0,
+    a2: { type: 'snap', cd: 3, name: 'Tail Flip', desc: 'Flick backwards to escape danger.' },
+    next: [],
+    desc: 'The most abundant animal on Earth. Snack-sized.',
+    model: { kind: 'shrimp', c1: '#c4704e', c2: '#7a3420' },
+  },
+  {
+    id: 'anchovy', name: 'Anchovy', tier: 1, role: 'Prey', era: 'Modern', ambient: true,
+    size: 0.6, hp: 14, speed: 9, bite: 2, biteCd: 1, armor: 0,
+    a2: { type: 'snap', cd: 3, name: 'Dart', desc: 'Dart away.' },
+    next: [],
+    desc: 'Small schooling baitfish.',
+    model: { kind: 'fish', c1: '#8a9a92', c2: '#34463f', belly: '#d2d6ce', shape: 'slim', pattern: 'none' },
+  },
 ];
 
 export const SPECIES_INDEX = {};
@@ -188,7 +205,9 @@ export function xpNeeded(level) {
 }
 
 // Every creature is drawn and collides at this multiple of its listed size.
-export const SIZE_SCALE = 1.3;
+export const SIZE_SCALE = 2.5;
+// Bigger bodies need more speed so they don't feel sluggish relative to their length.
+export const SPEED_SCALE = 1.5;
 
 export function stats(spIndex, level) {
   const s = SPECIES[spIndex];
@@ -196,7 +215,7 @@ export function stats(spIndex, level) {
   return {
     size: s.size * SIZE_SCALE * (1 + 0.045 * over),
     maxHp: Math.round(s.hp * (1 + 0.08 * over)),
-    speed: s.speed * (1 + 0.012 * over),
+    speed: s.speed * SPEED_SCALE * (1 + 0.012 * over),
     bite: s.bite * (1 + 0.08 * over),
     biteCd: s.biteCd,
     armor: s.armor,
@@ -211,8 +230,8 @@ export function xpValue(size) {
 
 // Bot population per zone: [speciesId, count, minLevel, maxLevel]
 export const BOT_TABLE = {
-  shallow: [['shrimp', 12, 1, 3], ['sardine', 5, 4, 6], ['puffer', 3, 4, 6], ['lionfish', 3, 4, 6], ['trilobite', 3, 4, 6], ['barracuda', 2, 9, 10]],
-  mid: [['sardine', 3, 5, 8], ['lionfish', 2, 5, 8], ['puffer', 2, 5, 8], ['trilobite', 2, 5, 8], ['barracuda', 3, 9, 12], ['grouper', 3, 9, 12], ['moray', 3, 9, 12], ['anomalocaris', 3, 9, 12], ['swordfish', 1, 15, 16]],
+  shallow: [['shrimp', 16, 1, 3], ['krill', 10, 1, 1], ['anchovy', 8, 1, 3], ['sardine', 7, 4, 6], ['puffer', 3, 4, 6], ['lionfish', 3, 4, 6], ['trilobite', 3, 4, 6], ['barracuda', 2, 9, 10]],
+  mid: [['anchovy', 6, 1, 3], ['sardine', 5, 5, 8], ['lionfish', 2, 5, 8], ['puffer', 2, 5, 8], ['trilobite', 2, 5, 8], ['barracuda', 3, 9, 12], ['grouper', 3, 9, 12], ['moray', 3, 9, 12], ['anomalocaris', 3, 9, 12], ['swordfish', 1, 15, 16]],
   deep: [['moray', 2, 11, 14], ['anomalocaris', 1, 11, 14], ['grouper', 1, 11, 14], ['mako', 2, 15, 19], ['greatwhite', 1, 16, 20], ['squid', 2, 16, 20], ['boxjelly', 1, 15, 19], ['turtle', 1, 15, 19], ['swordfish', 1, 15, 18], ['dunkleosteus', 1, 15, 19], ['cameroceras', 1, 15, 19],
     ['megalodon', 1, 21, 24], ['mosasaurus', 1, 21, 24], ['liopleurodon', 1, 21, 24], ['livyatan', 1, 21, 24]],
 };

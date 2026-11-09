@@ -2,6 +2,8 @@
 // Players own their movement (validated here); everything else (combat, XP, bots, food) is decided here.
 
 import { WORLD, floorHeight, forwardVec, clampToWorld, randomPointInZone, zoneForDepth } from './world.js';
+
+const AMBIENT_PER_PLAYER = 14;
 import { SPECIES, SPECIES_INDEX, EVOLVE_LEVELS, MAX_LEVEL, xpNeeded, stats, xpValue, BOT_TABLE } from './species.js';
 
 const FOOD_TARGET = { shallow: 480, mid: 190, deep: 90 };
@@ -178,6 +180,7 @@ export class Sim {
     p.entity = e;
     p.score = 0;
     p.kills = 0;
+    p.picked = false;
     p.lastIn = this.time;
     p.send({ t: 'spawn', id: e.id, pos: e.pos, yaw: e.yaw });
   }
@@ -198,6 +201,7 @@ export class Sim {
       case 'in': this.handleInput(p, msg); break;
       case 'a': this.handleAttack(p, msg); break;
       case 'evo': this.handleEvolve(p, msg); break;
+      case 'pick': this.handlePick(p, msg); break;
     }
   }
 
@@ -234,6 +238,71 @@ export class Sim {
     else if (msg.n === 2) this.ability(e);
   }
 
+  // side menu: become any creature (at the start of its tier); these runs are kept off the all-time board
+  handlePick(p, msg) {
+    const e = p.entity;
+    if (!e || !e.alive) return;
+    const idx = SPECIES_INDEX[msg.sp];
+    if (idx === undefined || SPECIES[idx].ambient) return;
+    const sp = SPECIES[idx];
+    e.sp = idx;
+    e.level = sp.minLevel;
+    e.xp = 0;
+    e.choices = null;
+    e.st = stats(idx, e.level);
+    e.hp = e.st.maxHp;
+    e.a2Ready = 0;
+    e.fx = {};
+    e.spawnShield = this.time + 3;
+    p.picked = true;
+    const zone = sp.tier <= 1 ? 'shallow' : sp.tier === 2 ? 'mid' : 'deep';
+    if (zoneForDepth(-e.pos[1]).id !== zone) {
+      e.pos = clampToWorld(randomPointInZone(zone), e.st.size * 0.3);
+      p.send({ t: 'fix', pos: e.pos });
+    }
+    for (const id of [...p.ambient || []]) this.despawn(id);
+    this.events.push({ k: 'evo', id: e.id, pos: e.pos.slice() });
+    this.checkEvolution(e);
+  }
+
+  despawn(id) {
+    const e = this.entities.get(id);
+    if (!e) return;
+    e.alive = false;
+    this.entities.delete(id);
+    if (e.bot && e.bot.owner) { const o = this.players.get(e.bot.owner); if (o && o.ambient) o.ambient.delete(id); }
+  }
+
+  // keep a few schools of edible, harmless fish around every player
+  upkeepAmbient() {
+    for (const e of [...this.entities.values()]) {
+      if (!e.bot || !e.bot.owner) continue;
+      const o = this.players.get(e.bot.owner);
+      const me = o && o.entity && o.entity.alive ? o.entity : null;
+      if (!me || dist2(me.pos, e.pos) > (150 + me.st.size * 4) ** 2) this.despawn(e.id);
+    }
+    for (const p of this.players.values()) {
+      const me = p.entity && p.entity.alive ? p.entity : null;
+      if (!me) continue;
+      p.ambient = p.ambient || new Set();
+      for (const id of p.ambient) if (!this.entities.has(id)) p.ambient.delete(id);
+      if (p.ambient.size >= AMBIENT_PER_PLAYER) continue;
+      // prey sized to be worth eating: the biggest few creatures well under your size
+      const cands = SPECIES.filter((s) => stats(s.index, s.minLevel).size <= me.st.size * 0.8).sort((a, b) => b.size - a.size).slice(0, 4);
+      const sp = cands.length ? cands[Math.floor(Math.random() * cands.length)] : SPECIES[SPECIES_INDEX.krill];
+      const count = 3 + Math.floor(Math.random() * 3);
+      const ang = Math.random() * Math.PI * 2, dist = 40 + me.st.size * 2.5 + Math.random() * 30;
+      const home = clampToWorld([me.pos[0] + Math.sin(ang) * dist, me.pos[1] + (Math.random() - 0.5) * 12, me.pos[2] + Math.cos(ang) * dist], 1);
+      for (let i = 0; i < count && p.ambient.size < AMBIENT_PER_PLAYER; i++) {
+        const pos = clampToWorld([home[0] + (Math.random() - 0.5) * 6, home[1] + (Math.random() - 0.5) * 3, home[2] + (Math.random() - 0.5) * 6], 1);
+        const level = sp.minLevel + Math.floor(Math.random() * 2);
+        const b = this.makeEntity(sp.index, level, pos, false);
+        b.bot = { passive: true, owner: p.clientId, home, zone: zoneForDepth(-pos[1]).id, mode: 'wander', target: null, wp: home, think: Math.random() * 0.5, hunger: 0, chaseTime: 0 };
+        p.ambient.add(b.id);
+      }
+    }
+  }
+
   handleEvolve(p, msg) {
     const e = p.entity;
     if (!e || !e.alive || !e.choices) return;
@@ -256,13 +325,13 @@ export class Sim {
     const hits = [];
     for (const o of this.entities.values()) {
       if (o === e || !o.alive) continue;
-      const reach = (e.st.size * 0.55 + o.st.size * 0.4 + 0.5) * reachMul;
+      const reach = (e.st.size * 0.7 + o.st.size * 0.5 + 1.2) * reachMul;
       const dx = o.pos[0] - e.pos[0], dy = o.pos[1] - e.pos[1], dz = o.pos[2] - e.pos[2];
       const d = Math.hypot(dx, dy, dz);
       if (d > reach) continue;
       const c = d < 0.01 ? 1 : (dx * fwd[0] + dy * fwd[1] + dz * fwd[2]) / d;
       // things right on top of you count even if slightly off-angle
-      if (c < cosLim && d > o.st.size * 0.35 + e.st.size * 0.2) continue;
+      if (c < cosLim && d > o.st.size * 0.5 + e.st.size * 0.3) continue;
       hits.push({ o, d });
     }
     hits.sort((a, b) => a.d - b.d);
@@ -276,7 +345,7 @@ export class Sim {
       e.biteReady = this.time + e.st.biteCd;
       this.events.push({ k: 'bite', id: e.id, pos: e.pos.slice() });
     }
-    const targets = this.findTargets(e, reachMul, opts.cone || 55, !!opts.multi);
+    const targets = this.findTargets(e, reachMul, opts.cone || 70, !!opts.multi);
     if (!targets.length) return false;
     let m = mul;
     if (e.fx.stealth > this.time) { m *= 2.5; e.fx.stealth = 0; }
@@ -307,7 +376,8 @@ export class Sim {
     t.lastHurt = this.time;
     if (by) t.lastAttacker = by.id;
     this.events.push({ k: 'hit', id: t.id, by: by ? by.id : 0, d: Math.round(dmg), pos: t.pos.slice(), s: r2(t.st.size) });
-    if (t.bot && by && by.alive) {
+    if (t.bot && t.bot.passive && by && by.alive) { t.bot.mode = 'flee'; t.bot.target = by.id; }
+    else if (t.bot && by && by.alive) {
       // fight back or flee
       if (by.st.size < t.st.size * 1.3) { t.bot.mode = 'chase'; t.bot.target = by.id; t.bot.chaseTime = 0; }
       else { t.bot.mode = 'flee'; t.bot.target = by.id; }
@@ -413,7 +483,7 @@ export class Sim {
       } : null;
       p.send({ t: 'dead', score: p.score, level: t.level, species: SPECIES[t.sp].name, kills: p.kills, killer });
       if (by && by.isPlayer) by.player.send({ t: 'feed', msg: `You ate ${p.name}` });
-    } else if (t.bot) {
+    } else if (t.bot && t.bot.slot) {
       this.botRespawns.push({ at: this.time + 4 + Math.random() * 8, slot: t.bot.slot });
     }
   }
@@ -456,7 +526,7 @@ export class Sim {
     if (!p.entity) return;
     const e = p.entity;
     const entry = { name: p.name, score: p.score, species: SPECIES[e.sp].name, level: e.level, at: Date.now() };
-    if (entry.score <= 0) return;
+    if (entry.score <= 0 || p.picked) return;
     const list = this.alltime.slice();
     list.push(entry);
     list.sort((a, b) => b.score - a.score);
@@ -497,7 +567,7 @@ export class Sim {
     }
     if (b.mode === 'chase' && this.entities.has(b.target) && b.chaseTime < 7) return;
     b.hunger = Math.min(1, b.hunger + 0.05);
-    if (prey && b.hunger > 0.45) { b.mode = 'chase'; b.target = prey.id; b.chaseTime = 0; return; }
+    if (prey && b.hunger > 0.45 && !b.passive) { b.mode = 'chase'; b.target = prey.id; b.chaseTime = 0; return; }
     // look for food nearby
     let food = null, foodD = Infinity;
     if (e.st.size < 4) {
@@ -505,7 +575,10 @@ export class Sim {
     }
     if (food) { b.mode = 'food'; b.target = food.id; return; }
     b.mode = 'wander'; b.target = null;
-    if (dist2(e.pos, b.wp) < 25 || Math.random() < 0.05) b.wp = randomPointInZone(b.zone);
+    if (dist2(e.pos, b.wp) < 25 || Math.random() < 0.05) {
+      if (b.home) b.wp = clampToWorld([b.home[0] + (Math.random() - 0.5) * 40, b.home[1] + (Math.random() - 0.5) * 10, b.home[2] + (Math.random() - 0.5) * 40], e.st.size * 0.3);
+      else b.wp = randomPointInZone(b.zone);
+    }
   }
 
   updateBot(e, dt) {
@@ -529,7 +602,7 @@ export class Sim {
       else {
         goal = t.pos; speedK = 0.88;
         const d = Math.sqrt(dist2(t.pos, e.pos));
-        if (d < e.st.size * 0.55 + t.st.size * 0.4 + 0.5) {
+        if (d < e.st.size * 0.7 + t.st.size * 0.5 + 1.2) {
           if (this.bite(e)) { if (!t.alive) b.hunger = 0; }
         } else if (d < e.st.size * 3 + 6 && Math.random() < dt * 0.6) this.ability(e);
       }
@@ -628,6 +701,7 @@ export class Sim {
     this.upkeepTimer -= dt;
     if (this.upkeepTimer <= 0) {
       this.upkeepTimer = 1;
+      this.upkeepAmbient();
       for (const f of [...this.meat]) if (now - f.born > MEAT_LIFETIME) this.removeFood(f);
     }
     for (const z of Object.keys(this.plankton)) {

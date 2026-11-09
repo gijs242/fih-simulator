@@ -24,6 +24,7 @@ Open http://localhost:3000. "Play offline" runs the whole simulation in your bro
 | Left click (hold) | Bite |
 | Right click | Species ability |
 | 1 / 2 | Pick an evolution |
+| Tab | Side menu: become any creature (these runs don't count for the all-time board) |
 | M | Mute |
 
 ## Evolution tree
@@ -35,6 +36,8 @@ Open http://localhost:3000. "Play offline" runs the whole simulation in your bro
 | 2 (9) | Barracuda · Goliath Grouper · Moray Eel · Anomalocaris |
 | 3 (15) | Mako · Swordfish · Great White · Leatherback · Giant Squid · Box Jellyfish · Dunkleosteus · Cameroceras |
 | 4 (21) | Megalodon · Mosasaurus · Liopleurodon · Livyatan |
+
+Schools of harmless prey (Antarctic krill, anchovies and smaller creatures) spawn around every player, sized so you can eat them.
 
 ## Deploying (Render)
 
