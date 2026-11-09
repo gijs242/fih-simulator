@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fih Simulator</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">{ "imports": { "three": "/vendor/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="vignette"></div>
+<div id="grain"></div>
+<div id="hurt"></div>
+<div id="inkfx"></div>
+<div id="labels"></div>
+
+<div id="hud" class="hidden">
+  <div id="status">
+    <div id="spname">Ghost Shrimp</div>
+    <div id="lvl">Level 1</div>
+    <div class="bar hp"><div id="hpfill"></div><span id="hptext"></span></div>
+    <div class="bar xp"><div id="xpfill"></div><span id="xptext"></span></div>
+    <div id="abilities">
+      <div class="ab" id="ab1"><div class="cd"></div><b>LMB</b><span>Bite</span></div>
+      <div class="ab" id="ab2"><div class="cd"></div><b>RMB</b><span id="a2name">Tail Flip</span></div>
+      <div class="ab" id="ab3"><div class="cd"></div><b>ALT</b><span>Dash</span></div>
+    </div>
+  </div>
+  <div id="board"><h3>Live</h3><ol id="live"></ol></div>
+  <div id="depth"><div id="zonename">Sunlit Shallows</div><div id="depthval">12 m</div></div>
+  <div id="feed"></div>
+  <div id="crosshair"></div>
+  <div id="lockhint">Click to control · Esc to free mouse</div>
+  <div id="evolve" class="hidden">
+    <h2>Evolve!</h2>
+    <p>Choose your path (press the number key or click)</p>
+    <div id="cards"></div>
+  </div>
+  <div id="mute">M: sound on</div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="panel">
+    <h1>FIH<br><small>SIMULATOR</small></h1>
+    <p class="tag">Start small. Eat. Evolve. Rule the deep.</p>
+    <input id="name" maxlength="16" placeholder="Your name" autocomplete="off">
+    <button id="play">Dive in</button>
+    <button id="offline" class="secondary">Play offline (solo)</button>
+    <div id="netstatus">Connecting…</div>
+    <div class="cols">
+      <div>
+        <h3>Controls</h3>
+        <table class="keys">
+          <tr><td>Mouse</td><td>Steer</td></tr>
+          <tr><td>W A S D</td><td>Swim</td></tr>
+          <tr><td>Space / Shift</td><td>Up / down</td></tr>
+          <tr><td>Alt</td><td>Dash</td></tr>
+          <tr><td>Left click</td><td>Bite</td></tr>
+          <tr><td>Right click</td><td>Special ability</td></tr>
+          <tr><td>M</td><td>Mute</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Hall of Predators</h3>
+        <ol id="alltime"><li class="muted">No legends yet</li></ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="death" class="screen hidden">
+  <div class="panel">
+    <h1 class="red">EATEN</h1>
+    <p id="deathby"></p>
+    <div id="deathstats"></div>
+    <button id="respawn">Respawn</button>
+    <button id="tomenu" class="secondary">Main menu</button>
+  </div>
+</div>
+
+<script type="module" src="/main.js"></script>
+</body>
+</html>
