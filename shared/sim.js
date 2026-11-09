@@ -4,7 +4,14 @@
 import { WORLD, floorHeight, forwardVec, clampToWorld, randomPointInZone, zoneForDepth } from './world.js';
 
 const AMBIENT_PER_PLAYER = 14;
-import { SPECIES, SPECIES_INDEX, EVOLVE_LEVELS, MAX_LEVEL, xpNeeded, stats, xpValue, BOT_TABLE } from './species.js';
+import { SPECIES, SPECIES_INDEX, EVOLVE_LEVELS, MAX_LEVEL, xpNeeded, stats as baseStats, xpValue, BOT_TABLE, PLAYER_DAMAGE, PLAYER_SPEED } from './species.js';
+
+// players get a damage and speed bonus over bots
+function stats(spIndex, level, isPlayer = false) {
+  const st = baseStats(spIndex, level);
+  if (isPlayer) { st.bite *= PLAYER_DAMAGE; st.speed *= PLAYER_SPEED; }
+  return st;
+}
 
 const FOOD_TARGET = { shallow: 480, mid: 190, deep: 90 };
 const FOOD_REFILL = { shallow: 8, mid: 3, deep: 2 };
@@ -66,7 +73,7 @@ export class Sim {
 
   // ---------------------------------------------------------------- entities
   makeEntity(spIndex, level, pos, isPlayer) {
-    const st = stats(spIndex, level);
+    const st = stats(spIndex, level, isPlayer);
     const e = {
       id: this.nextId++, sp: spIndex, level, isPlayer,
       pos, vel: [0, 0, 0], yaw: Math.random() * Math.PI * 2, pitch: 0,
@@ -80,12 +87,13 @@ export class Sim {
 
   refreshStats(e) {
     const ratio = e.hp / e.st.maxHp;
-    e.st = stats(e.sp, e.level);
+    e.st = stats(e.sp, e.level, e.isPlayer);
     e.hp = Math.min(e.st.maxHp, Math.max(1, ratio * e.st.maxHp));
   }
 
   spawnBot(slot) {
-    const sp = SPECIES_INDEX[slot.sp];
+    const id = Array.isArray(slot.sp) ? slot.sp[Math.floor(Math.random() * slot.sp.length)] : slot.sp;
+    const sp = SPECIES_INDEX[id];
     const level = slot.lo + Math.floor(Math.random() * (slot.hi - slot.lo + 1));
     const pos = randomPointInZone(slot.zone);
     const e = this.makeEntity(sp, level, pos, false);
@@ -249,7 +257,7 @@ export class Sim {
     e.level = sp.minLevel;
     e.xp = 0;
     e.choices = null;
-    e.st = stats(idx, e.level);
+    e.st = stats(idx, e.level, true);
     e.hp = e.st.maxHp;
     e.a2Ready = 0;
     e.fx = {};
@@ -286,14 +294,16 @@ export class Sim {
       if (!me) continue;
       p.ambient = p.ambient || new Set();
       for (const id of p.ambient) if (!this.entities.has(id)) p.ambient.delete(id);
-      if (p.ambient.size >= AMBIENT_PER_PLAYER) continue;
+      // half as many prey schools in the abyss
+      const target = zoneForDepth(-me.pos[1]).id === 'deep' ? AMBIENT_PER_PLAYER / 2 : AMBIENT_PER_PLAYER;
+      if (p.ambient.size >= target) continue;
       // prey sized to be worth eating: the biggest few creatures well under your size
       const cands = SPECIES.filter((s) => stats(s.index, s.minLevel).size <= me.st.size * 0.8).sort((a, b) => b.size - a.size).slice(0, 4);
       const sp = cands.length ? cands[Math.floor(Math.random() * cands.length)] : SPECIES[SPECIES_INDEX.krill];
       const count = 3 + Math.floor(Math.random() * 3);
       const ang = Math.random() * Math.PI * 2, dist = 40 + me.st.size * 2.5 + Math.random() * 30;
       const home = clampToWorld([me.pos[0] + Math.sin(ang) * dist, me.pos[1] + (Math.random() - 0.5) * 12, me.pos[2] + Math.cos(ang) * dist], 1);
-      for (let i = 0; i < count && p.ambient.size < AMBIENT_PER_PLAYER; i++) {
+      for (let i = 0; i < count && p.ambient.size < target; i++) {
         const pos = clampToWorld([home[0] + (Math.random() - 0.5) * 6, home[1] + (Math.random() - 0.5) * 3, home[2] + (Math.random() - 0.5) * 6], 1);
         const level = sp.minLevel + Math.floor(Math.random() * 2);
         const b = this.makeEntity(sp.index, level, pos, false);

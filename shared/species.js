@@ -208,6 +208,9 @@ export function xpNeeded(level) {
 export const SIZE_SCALE = 2.5;
 // Bigger bodies need more speed so they don't feel sluggish relative to their length.
 export const SPEED_SCALE = 1.5;
+// Human players hit harder and swim faster than bots of the same species.
+export const PLAYER_DAMAGE = 1.5;
+export const PLAYER_SPEED = 1.25;
 
 export function stats(spIndex, level) {
   const s = SPECIES[spIndex];
@@ -228,10 +231,12 @@ export function xpValue(size) {
   return Math.round(2 + 5 * base * base);
 }
 
-// Bot population per zone: [speciesId, count, minLevel, maxLevel]
+// Bot population per zone: [speciesId or [choices], count, minLevel, maxLevel]
 export const BOT_TABLE = {
   shallow: [['shrimp', 16, 1, 3], ['krill', 10, 1, 1], ['anchovy', 8, 1, 3], ['sardine', 7, 4, 6], ['puffer', 3, 4, 6], ['lionfish', 3, 4, 6], ['trilobite', 3, 4, 6], ['barracuda', 2, 9, 10]],
   mid: [['anchovy', 6, 1, 3], ['sardine', 5, 5, 8], ['lionfish', 2, 5, 8], ['puffer', 2, 5, 8], ['trilobite', 2, 5, 8], ['barracuda', 3, 9, 12], ['grouper', 3, 9, 12], ['moray', 3, 9, 12], ['anomalocaris', 3, 9, 12], ['swordfish', 1, 15, 16]],
-  deep: [['moray', 2, 11, 14], ['anomalocaris', 1, 11, 14], ['grouper', 1, 11, 14], ['mako', 2, 15, 19], ['greatwhite', 1, 16, 20], ['squid', 2, 16, 20], ['boxjelly', 1, 15, 19], ['turtle', 1, 15, 19], ['swordfish', 1, 15, 18], ['dunkleosteus', 1, 15, 19], ['cameroceras', 1, 15, 19],
-    ['megalodon', 1, 21, 24], ['mosasaurus', 1, 21, 24], ['liopleurodon', 1, 21, 24], ['livyatan', 1, 21, 24]],
+  // the abyss is sparse: 9 creatures, each spot picks a random species from its group every time it respawns
+  deep: [[['moray', 'anomalocaris', 'grouper'], 2, 11, 14],
+    [['mako', 'greatwhite', 'squid', 'boxjelly', 'turtle', 'swordfish', 'dunkleosteus', 'cameroceras'], 5, 15, 20],
+    [['megalodon', 'mosasaurus', 'liopleurodon', 'livyatan'], 2, 21, 24]],
 };
