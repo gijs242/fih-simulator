@@ -123,7 +123,7 @@ export const SPECIES = [
   },
   {
     id: 'boxjelly', name: 'Box Jellyfish', tier: 3, role: 'Venom', era: 'Modern',
-    size: 4, hp: 420, speed: 9, bite: 40, biteCd: 0.5, armor: 0, venomous: true,
+    size: 4.5, hp: 420, speed: 9, bite: 40, biteCd: 0.5, armor: 0, venomous: true,
     a2: { type: 'pulse', cd: 7, name: 'Venom Pulse', desc: 'Poison everything around you. Your stings always poison.' },
     next: ['liopleurodon', 'livyatan'],
     desc: 'Barely visible, utterly lethal.',
@@ -164,7 +164,7 @@ export const SPECIES = [
   },
   {
     id: 'liopleurodon', name: 'Liopleurodon', tier: 4, role: 'Apex', era: 'Middle Jurassic',
-    size: 11, hp: 2300, speed: 15.5, bite: 230, biteCd: 0.8, armor: 0.2,
+    size: 15, hp: 2300, speed: 15.5, bite: 230, biteCd: 0.8, armor: 0.2,
     a2: { type: 'ram', cd: 5, name: 'Flipper Charge', desc: 'Four-flipper burst that knocks back and stuns.' },
     next: [],
     desc: 'A short-necked pliosaur with a crushing skull.',
@@ -216,7 +216,7 @@ export function stats(spIndex, level) {
   const s = SPECIES[spIndex];
   const over = Math.max(0, level - s.minLevel);
   return {
-    size: s.size * SIZE_SCALE * (1 + 0.045 * over),
+    size: s.size * SIZE_SCALE * (1 + 0.08 * over), // grows 8% every level
     maxHp: Math.round(s.hp * (1 + 0.08 * over)),
     speed: s.speed * SPEED_SCALE * (1 + 0.012 * over),
     bite: s.bite * (1 + 0.08 * over),

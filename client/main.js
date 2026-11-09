@@ -438,7 +438,9 @@ function game() {
     mine.root.rotation.x = -local.bodyPitch;
     mine.roll = (mine.roll || 0) + ((Math.max(-0.6, Math.min(0.6, -turn / Math.max(dt, 1e-3) * 0.25))) - (mine.roll || 0)) * Math.min(1, dt * 4);
     mine.root.rotation.z = mine.roll;
-    mine.root.scale.setScalar(me.size);
+    // grow smoothly toward the new size after a level-up or evolution
+    mine.dispSize = mine.dispSize ? mine.dispSize + (me.size - mine.dispSize) * Math.min(1, dt * 2.5) : me.size;
+    mine.root.scale.setScalar(mine.dispSize);
     mine.update(dt, Math.min(1.5, local.vel.length() / me.speed), mine.flags || 0);
     mine.setOpacity((mine.flags & 4) ? 0.35 : 1);
     // send
@@ -481,7 +483,8 @@ function game() {
       e.roll = (e.roll || 0) + (Math.max(-0.5, Math.min(0.5, -turn / Math.max(dt, 1e-3) * 0.15)) - (e.roll || 0)) * Math.min(1, dt * 4);
       e.c.root.position.copy(e.pos);
       e.c.root.rotation.set(-e.pitch, e.yaw, e.roll);
-      e.c.root.scale.setScalar(e.size);
+      e.dispSize = e.dispSize ? e.dispSize + (e.size - e.dispSize) * Math.min(1, dt * 2.5) : e.size;
+      e.c.root.scale.setScalar(e.dispSize);
       e.c.update(dt, Math.min(1.5, e.speed / e.st.speed), e.flags);
       e.c.setOpacity((e.flags & 4) ? 0.08 : 1);
     }
