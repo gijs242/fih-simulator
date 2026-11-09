@@ -3,7 +3,7 @@
 
 import { WORLD, floorHeight, forwardVec, clampToWorld, randomPointInZone, zoneForDepth } from './world.js';
 
-const AMBIENT_PER_PLAYER = 14;
+const AMBIENT_PER_PLAYER = 7;
 import { SPECIES, SPECIES_INDEX, EVOLVE_LEVELS, MAX_LEVEL, xpNeeded, stats as baseStats, xpValue, BOT_TABLE, PLAYER_DAMAGE, PLAYER_SPEED } from './species.js';
 
 // players get a damage and speed bonus over bots
