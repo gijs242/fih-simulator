@@ -45,7 +45,7 @@ function game() {
   let me = null;               // latest server state about me
   let mine = null;             // my creature model
   const ents = new Map();      // id -> remote entity
-  const local = { pos: new THREE.Vector3(0, -10, -250), vel: new THREE.Vector3(), stunUntil: 0, dashT: 0, boostT: 0 };
+  const local = { pos: new THREE.Vector3(0, -10, -250), vel: new THREE.Vector3(), stunUntil: 0, dashT: 0, boostT: 0, bodyYaw: 0, bodyPitch: 0, faceT: 0, faceYaw: 0, facePitch: 0 };
   const cds = { bite: 0, a2: 0, dash: 0, dashMax: 2.5 };
   let sendTimer = 0;
   let clock = 0;
@@ -197,6 +197,7 @@ function game() {
         local.pos.set(m.pos[0], m.pos[1], m.pos[2]);
         local.vel.set(0, 0, 0);
         input.yaw = m.yaw; input.pitch = 0;
+        local.bodyYaw = m.yaw; local.bodyPitch = 0; local.faceT = 0;
         camPos.copy(local.pos).add(new THREE.Vector3(0, 1, -4));
         break;
       case 'fix': local.pos.set(m.pos[0], m.pos[1], m.pos[2]); break;
@@ -295,7 +296,11 @@ function game() {
     switch (ev.k) {
       case 'bite': {
         const c = creatureOf(ev.id);
-        if (c && ev.id !== myId) c.bite();
+        if (c && ev.id !== myId) {
+          c.attack('bite');
+          const e = ents.get(ev.id);
+          if (e) fx.chomp(e.c.root, e.size);
+        }
         if (ev.id !== myId) audio.bite(volAt(ev.pos) * 0.8, c ? c.spec.size : 1);
         break;
       }
@@ -337,7 +342,11 @@ function game() {
         if (ev.type === 'pulse') fx.ring(ev.pos, size * 2.4 + 3, '#70e070', 0.7);
         if (ev.type === 'sonar') fx.ring(ev.pos, size * 3, '#c0e8ff', 0.8);
         if (ev.type === 'spikes' || ev.type === 'shell') fx.ring(ev.pos, size * 1.4, '#e0d8a0', 0.4);
-        if (ev.type === 'slash' || ev.type === 'grab' || ev.type === 'venom') { if (c && ev.id !== myId) c.bite(); }
+        if (c && ev.id !== myId) {
+          c.attack(ev.type);
+          const e = ents.get(ev.id);
+          if (e && (ev.type === 'slash' || ev.type === 'grab' || ev.type === 'venom')) fx.chomp(e.c.root, e.size * 1.2);
+        }
         if (['lunge', 'ram', 'snap', 'ink'].includes(ev.type)) fx.bubbles(ev.pos, 10, size * 0.5);
         break;
       }
@@ -347,6 +356,8 @@ function game() {
 
   // ---------------------------------------------------------------- local control
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), desired = new THREE.Vector3();
+
+  function faceAim(t) { local.faceYaw = input.yaw; local.facePitch = input.pitch; local.faceT = t; }
 
   function controlMe(dt) {
     if (!alive || !me || !mine) return;
@@ -379,33 +390,53 @@ function game() {
       }
       if ((press.a1 || input.held.a1) && cds.bite <= 0) {
         cds.bite = sp.biteCd;
-        mine.bite();
+        faceAim(0.35);
+        mine.attack('bite');
+        fx.chomp(mine.root, me.size);
         audio.bite(1, me.size);
         conn.send({ t: 'a', n: 1, yaw: input.yaw, pitch: input.pitch });
       }
       if (press.a2 && cds.a2 <= 0) {
+        const type = sp.a2.type;
         cds.a2 = sp.a2.cd;
-        conn.send({ t: 'a', n: 2, yaw: input.yaw, pitch: input.pitch });
-        audio.ability(sp.a2.type, 1);
-        switch (sp.a2.type) {
-          case 'snap': local.vel.copy(fwd).multiplyScalar(-me.speed * 3.2); break;
-          case 'lunge': local.vel.copy(fwd).multiplyScalar(me.speed * 2.6); mine.bite(); break;
-          case 'ram': local.vel.copy(fwd).multiplyScalar(me.speed * 2.4); break;
-          case 'ink': local.vel.addScaledVector(fwd, me.speed * 1.5); local.boostT = 2; break;
-          case 'grab': case 'slash': case 'venom': mine.bite(); break;
+        audio.ability(type, 1);
+        if (type === 'snap') {
+          // tail flip: shoot backwards relative to where the body points, without turning around
+          const bf = forwardVec(local.bodyYaw, local.bodyPitch);
+          local.vel.set(-bf[0], -bf[1], -bf[2]).multiplyScalar(me.speed * 3.2);
+          local.faceYaw = local.bodyYaw; local.facePitch = local.bodyPitch; local.faceT = 0.6;
+          conn.send({ t: 'a', n: 2, yaw: local.bodyYaw, pitch: local.bodyPitch });
+        } else {
+          faceAim(0.5);
+          conn.send({ t: 'a', n: 2, yaw: input.yaw, pitch: input.pitch });
+          switch (type) {
+            case 'lunge': local.vel.copy(fwd).multiplyScalar(me.speed * 2.6); break;
+            case 'ram': local.vel.copy(fwd).multiplyScalar(me.speed * 2.4); break;
+            case 'ink': local.vel.addScaledVector(fwd, me.speed * 1.5); local.boostT = 2; break;
+          }
+          if (type === 'venom' || type === 'grab' || type === 'slash') fx.chomp(mine.root, me.size * (type === 'slash' ? 1.3 : 1.1));
         }
+        mine.attack(type);
         fx.bubbles(local.pos.toArray(), 6, me.size * 0.4);
       }
     }
     local.pos.addScaledVector(local.vel, dt);
     const arr = clampToWorld(local.pos.toArray(), me.size * 0.3);
     local.pos.set(arr[0], arr[1], arr[2]);
-    // model
+    // body heading: follow the swim direction; briefly snap to the aim when attacking
+    const v = local.vel, vs = v.length();
+    let ty = local.bodyYaw, tp = local.bodyPitch, rate = 5;
+    if (local.faceT > 0) { local.faceT -= dt; ty = local.faceYaw; tp = local.facePitch; rate = 24; }
+    else if (vs > me.speed * 0.12) { ty = Math.atan2(v.x, v.z); tp = Math.max(-1.3, Math.min(1.3, Math.atan2(v.y, Math.hypot(v.x, v.z)))); }
+    else tp *= 0.98; // level out when idle
+    const tk = 1 - Math.exp(-dt * rate);
+    const turn = angleDiff(ty, local.bodyYaw) * tk;
+    local.bodyYaw += turn;
+    local.bodyPitch += (tp - local.bodyPitch) * tk;
     mine.root.position.copy(local.pos);
-    const turn = angleDiff(input.yaw, mine.root.rotation.y);
-    mine.root.rotation.y = input.yaw;
-    mine.root.rotation.x = -input.pitch;
-    mine.roll = (mine.roll || 0) + ((Math.max(-0.6, Math.min(0.6, -turn * 12))) - (mine.roll || 0)) * Math.min(1, dt * 4);
+    mine.root.rotation.y = local.bodyYaw;
+    mine.root.rotation.x = -local.bodyPitch;
+    mine.roll = (mine.roll || 0) + ((Math.max(-0.6, Math.min(0.6, -turn / Math.max(dt, 1e-3) * 0.25))) - (mine.roll || 0)) * Math.min(1, dt * 4);
     mine.root.rotation.z = mine.roll;
     mine.root.scale.setScalar(me.size);
     mine.update(dt, Math.min(1.5, local.vel.length() / me.speed), mine.flags || 0);
@@ -414,7 +445,7 @@ function game() {
     sendTimer -= dt;
     if (sendTimer <= 0) {
       sendTimer = 0.05;
-      conn.send({ t: 'in', p: [r2(local.pos.x), r2(local.pos.y), r2(local.pos.z)], yaw: r3(input.yaw), pitch: r3(input.pitch) });
+      conn.send({ t: 'in', p: [r2(local.pos.x), r2(local.pos.y), r2(local.pos.z)], yaw: r3(local.bodyYaw), pitch: r3(local.bodyPitch) });
     }
   }
 
@@ -563,7 +594,7 @@ function game() {
   $('play').disabled = true;
   connectOnline();
   // test hook
-  window.__fih = { get me() { return me; }, get alive() { return alive; }, get ents() { return ents.size; }, get players() { return [...ents.values()].filter((e) => e.name).map((e) => e.name); }, local, input, get conn() { return conn; }, get myId() { return myId; }, get hl() { return food.glow.visible ? food.hl : null; }, food };
+  window.__fih = { get me() { return me; }, get alive() { return alive; }, get ents() { return ents.size; }, get players() { return [...ents.values()].filter((e) => e.name).map((e) => e.name); }, local, input, get conn() { return conn; }, get myId() { return myId; }, get hl() { return food.glow.visible ? food.hl : null; }, food, get mine() { return mine; } };
 }
 
 function angleDiff(a, b) {

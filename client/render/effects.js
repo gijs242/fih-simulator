@@ -20,6 +20,19 @@ function bubbleTexture() {
   return new THREE.CanvasTexture(cv);
 }
 
+function teethTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 48;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(40,10,8,0.55)';
+  ctx.beginPath(); ctx.moveTo(4, 4); ctx.quadraticCurveTo(64, 22, 124, 4); ctx.lineTo(124, 0); ctx.lineTo(4, 0); ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 9; i++) {
+    const x = 8 + i * 14, top = 4 + Math.sin(i / 8 * Math.PI) * 10;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + 12, top); ctx.lineTo(x + 6, top + 26 - Math.abs(i - 4) * 2); ctx.closePath(); ctx.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
 export class Effects {
   constructor(scene) {
     this.scene = scene;
@@ -34,6 +47,21 @@ export class Effects {
       this.pool.push(s);
     }
     this.rings = [];
+    this.chomps = [];
+    this.teethTex = teethTexture();
+  }
+
+  // two rows of teeth that slam shut in front of a creature's mouth (follows the creature as it turns)
+  chomp(root, size) {
+    const w = Math.max(0.5, size * 0.4);
+    const parts = [1, -1].map((side) => {
+      const m = new THREE.SpriteMaterial({ map: this.teethTex, transparent: true, depthWrite: false, rotation: side > 0 ? 0 : Math.PI, color: '#f4efe0' });
+      const sp = new THREE.Sprite(m);
+      sp.scale.set(w, w * 0.4, 1);
+      this.scene.add(sp);
+      return { sp, side };
+    });
+    this.chomps.push({ parts, root, size, w, life: 0, mouth: new THREE.Vector3() });
   }
 
   spawn(pos, o) {
@@ -93,6 +121,19 @@ export class Effects {
       s.position.x += u.v[0] * dt; s.position.y += u.v[1] * dt; s.position.z += u.v[2] * dt;
       s.scale.setScalar(u.s0 + (u.s1 - u.s0) * Math.sqrt(k));
       s.material.opacity = u.a * (1 - k * k);
+    }
+    for (let i = this.chomps.length - 1; i >= 0; i--) {
+      const c = this.chomps[i];
+      c.life += dt;
+      const k = c.life / 0.32;
+      if (k >= 1) { for (const p of c.parts) { this.scene.remove(p.sp); p.sp.material.dispose(); } this.chomps.splice(i, 1); continue; }
+      c.mouth.set(0, 0, 1).applyQuaternion(c.root.quaternion).multiplyScalar(c.size * 0.62).add(c.root.position);
+      const close = Math.min(1, k / 0.4); // jaws close over the first 40%, then fade
+      const gap = (1 - close * close) * c.w * 0.45 + c.w * 0.12;
+      for (const p of c.parts) {
+        p.sp.position.set(c.mouth.x, c.mouth.y + p.side * gap, c.mouth.z);
+        p.sp.material.opacity = k < 0.5 ? 0.95 : 0.95 * (1 - (k - 0.5) / 0.5);
+      }
     }
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i];

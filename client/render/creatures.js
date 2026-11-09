@@ -249,8 +249,12 @@ export class Creature {
     this.kind = this.spec.model.kind;
     this.root = new THREE.Group();
     this.root.rotation.order = 'YXZ';
+    // pose sits between root and model and carries attack animations
+    this.pose = new THREE.Group();
+    this.root.add(this.pose);
     this.model = new THREE.Group();
-    this.root.add(this.model);
+    this.pose.add(this.model);
+    this.atk = null;
     this.U = {
       uPhase: { value: Math.random() * 6 }, uAmp: { value: 0.03 }, uK: { value: 6 }, uFall: { value: 0 }, uAxis: { value: 0 },
       uFlash: { value: 0 }, uPoison: { value: 0 },
@@ -338,6 +342,55 @@ export class Creature {
   setJaw(pivot, open = 0.5) { this.jaw = { pivot, open, base: pivot.rotation.x }; }
 
   bite() { this.biteT = 1; }
+
+  // whole-body attack animation; jaws/arms also open for bite-type attacks
+  attack(type) {
+    const dur = { bite: 0.3, lunge: 0.55, ram: 0.55, slash: 0.4, venom: 0.35, grab: 0.45, snap: 0.4 }[type] || 0.45;
+    this.atk = { type, t: 0, dur };
+    if (type === 'bite' || type === 'lunge' || type === 'venom' || type === 'grab' || type === 'slash') this.bite();
+  }
+
+  animateAttack(dt) {
+    const p = this.pose;
+    p.position.set(0, 0, 0); p.rotation.set(0, 0, 0); p.scale.set(1, 1, 1);
+    const a = this.atk;
+    if (!a) return;
+    a.t += dt;
+    const k = a.t / a.dur;
+    if (k >= 1) { this.atk = null; return; }
+    const s = Math.sin(k * Math.PI);
+    switch (a.type) {
+      case 'bite': // rear the head back, then snap forward
+        p.position.z = Math.sin(k * Math.PI) * 0.14 - (k < 0.3 ? Math.sin(k / 0.3 * Math.PI) * 0.05 : 0);
+        p.rotation.x = -Math.sin(k * Math.PI * 2) * 0.16;
+        break;
+      case 'lunge': // stretch out and shoot forward
+        p.position.z = s * 0.14;
+        p.scale.set(1 - s * 0.1, 1 - s * 0.1, 1 + s * 0.22);
+        p.rotation.x = -Math.sin(k * Math.PI * 2) * 0.1;
+        break;
+      case 'ram': // tuck the head and drive
+        p.position.z = s * 0.16;
+        p.rotation.x = s * 0.22;
+        p.scale.set(1 + s * 0.06, 1 + s * 0.06, 1 - s * 0.05);
+        break;
+      case 'slash': // sweep the head side to side
+        p.rotation.y = Math.sin(k * Math.PI * 2) * 0.75 * (1 - k * 0.5);
+        p.position.z = s * 0.06;
+        break;
+      case 'venom': case 'grab': // fast thrust
+        p.position.z = Math.sin(Math.min(1, k * 1.6) * Math.PI) * 0.2;
+        p.rotation.x = -s * 0.08;
+        break;
+      case 'snap': // tail flick: curl and kick
+        p.rotation.x = s * 0.7;
+        p.position.z = -s * 0.12;
+        break;
+      default: // inflate, shell, ink, pulse, sonar, ambush: body pulse
+        p.scale.setScalar(1 + s * 0.14);
+        p.position.z = a.type === 'sonar' ? s * 0.08 : 0;
+    }
+  }
   hit() { this.flash = 1; }
 
   setOpacity(a) {
@@ -370,6 +423,7 @@ export class Creature {
       }
     }
     for (const a of this.anims) a(t, dt, speed01);
+    this.animateAttack(dt);
     this.model.rotation.z = (flags & 64) ? Math.sin(t * 22) * 0.2 : 0;
   }
 
